@@ -1,15 +1,21 @@
 {
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "package.json",
-      "use": "@vercel/static-build"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "src": "/api/(.*)",
+      "dest": "/api/route.js",
+      "methods": ["GET", "POST"]
+    },
+    {
+      "src": "/static/(.*)",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
+      }
     }
   ]
 }
