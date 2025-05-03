@@ -54,7 +54,12 @@ app.get('/api/users/:vehicleId', async (req, res) => {
     res.status(500).json({ message: 'Error retrieving user', error: err.message });
   }
 });
-
+app.get("/",(req,res)=>{
+  res.send({
+    status:"server is activated",
+    status:true
+  })
+})
 // Delete user
 app.delete('/api/users/:vehicleId', async (req, res) => {
   try {
