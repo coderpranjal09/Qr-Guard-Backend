@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "serve": "vite preview"
+    "serve": "vite preview",
+    "vercel-build": "vite build && mv dist public"
   },
   "dependencies": {
     "axios": "^1.9.0",
