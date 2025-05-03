@@ -22,7 +22,7 @@ function AddUser() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/users', formData);
+      const res = await axios.post('https://qr-guard-backend.vercel.app/api/users', formData);
       setMessage('✅ User added successfully!');
     } catch (error) {
       setMessage('❌ Failed to add user.');

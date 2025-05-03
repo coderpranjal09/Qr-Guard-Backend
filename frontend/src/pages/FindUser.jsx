@@ -8,7 +8,7 @@ function FindUser() {
 
   const handleSearch = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/users/${vehicleId}`);
+      const res = await axios.get(`https://qr-guard-backend.vercel.app/api/users/${vehicleId}`);
       setUser(res.data);
       setMessage('');
     } catch (err) {
@@ -19,7 +19,7 @@ function FindUser() {
 
   const handleDelete = async () => {
     try {
-      await axios.delete(`http://localhost:5000/api/users/${vehicleId}`);
+      await axios.delete(`https://qr-guard-backend.vercel.app/api/users/${vehicleId}`);
       setUser(null);
       setMessage('✅ User deleted.');
     } catch (err) {
