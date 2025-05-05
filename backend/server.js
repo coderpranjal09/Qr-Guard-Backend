@@ -23,7 +23,7 @@ const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TO
 // MongoDB schema
 const User = mongoose.model('User', {
   name: String,
-  mobile: String,
+  mobileNo: String,
   vehicleId: String,
   driverName: String,
   vehicleNo: String,
