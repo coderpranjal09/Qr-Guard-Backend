@@ -1,4 +1,3 @@
-// AddUser.js
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { CheckIcon, XIcon } from '@heroicons/react/solid';
@@ -16,6 +15,7 @@ function AddUser() {
   });
 
   const [message, setMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (message) {
@@ -30,12 +30,15 @@ function AddUser() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
     try {
       await axios.post('https://qr-guard-backend.vercel.app/api/users', formData);
       setMessage('success');
       setFormData(Object.fromEntries(Object.keys(formData).map(key => [key, ''])));
     } catch (error) {
       setMessage('error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -52,19 +55,11 @@ function AddUser() {
 
   return (
     <div className="max-w-2xl mx-auto bg-white shadow-xl rounded-2xl p-8 m-4">
-      <h2 className="text-3xl font-bold text-gray-800 mb-8 text-center">
-        Add New User
-      </h2>
-      
+      <h2 className="text-3xl font-bold text-gray-800 mb-8 text-center">Add New User</h2>
+
       {message && (
-        <div className={`mb-6 p-4 rounded-lg flex items-center space-x-3 ${
-          message === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-        }`}>
-          {message === 'success' ? (
-            <CheckIcon className="w-6 h-6" />
-          ) : (
-            <XIcon className="w-6 h-6" />
-          )}
+        <div className={`mb-6 p-4 rounded-lg flex items-center space-x-3 ${message === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+          {message === 'success' ? <CheckIcon className="w-6 h-6" /> : <XIcon className="w-6 h-6" />}
           <span className="font-medium">
             {message === 'success' ? 'User added successfully!' : 'Failed to add user.'}
           </span>
@@ -74,9 +69,7 @@ function AddUser() {
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {Object.entries(formData).map(([field, value]) => (
           <div key={field} className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              {fieldLabels[field]}
-            </label>
+            <label className="block text-sm font-medium text-gray-700">{fieldLabels[field]}</label>
             <input
               type="text"
               name={field}
@@ -90,10 +83,10 @@ function AddUser() {
         
         <button
           type="submit"
-          className="md:col-span-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg 
-                    transform transition-all duration-200 hover:scale-105 hover:shadow-lg"
+          disabled={isLoading}
+          className={`md:col-span-2 w-full bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg transform transition-all duration-200 ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700 hover:scale-105 hover:shadow-lg'}`}
         >
-          Add User
+          {isLoading ? 'Adding...' : 'Add User'}
         </button>
       </form>
     </div>
