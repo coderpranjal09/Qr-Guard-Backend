@@ -1,19 +1,24 @@
+// server.js
+
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
-const axios = require('axios');
+const twilio = require('twilio');
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection
+// Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 });
+
+// Twilio client
+const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 // MongoDB schema
 const User = mongoose.model('User', {
@@ -25,11 +30,6 @@ const User = mongoose.model('User', {
   model: String,
   email: String,
   driverNo: String
-});
-
-// Home route
-app.get("/", (req, res) => {
-  res.send({ status: "server is activated", status: true });
 });
 
 // Add user
@@ -54,7 +54,12 @@ app.get('/api/users/:vehicleId', async (req, res) => {
     res.status(500).json({ message: 'Error retrieving user', error: err.message });
   }
 });
-
+app.get("/",(req,res)=>{
+  res.send({
+    status:"server is activated",
+    status:true
+  })
+})
 // Delete user
 app.delete('/api/users/:vehicleId', async (req, res) => {
   try {
@@ -65,7 +70,23 @@ app.delete('/api/users/:vehicleId', async (req, res) => {
   }
 });
 
-// ✅ Hindi TTS Call using Exotel API
+// ✅ OPTION 1: Route that returns TwiML XML (used in live calls)
+app.get('/api/call-handler', (req, res) => {
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.say(
+    {
+      voice: 'Polly.Aditi',
+      language: 'hi-IN'
+    },
+    'यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।'
+    
+  );
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// ✅ OPTION 2: Initiate call with inline TwiML (recommended for testing)
 app.post('/api/call-owner', async (req, res) => {
   try {
     const { vehicleId } = req.body;
@@ -73,53 +94,38 @@ app.post('/api/call-owner', async (req, res) => {
 
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    const phone = user.driverNo;
-
-    if (!/^\d{10}$/.test(phone)) {
-      return res.status(400).json({ success: false, message: 'Phone number should be 10 digits' });
+    if (!/^\+[1-9]\d{1,14}$/.test(user.driverNo)) {
+      return res.status(400).json({ success: false, message: 'Invalid phone number format' });
     }
 
-    const message = "यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।";
+    const call = await client.calls.create({
+        // ✅ Inline fallback TwiML instead of external URL
+        twiml: `<Response>
+          <Say voice="Polly.Aditi" language="hi-IN">
+           यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।
+          </Say>
+        </Response>`,
+        to: user.driverNo,
+        from: process.env.TWILIO_PHONE_NUMBER
+      });
+      
 
-    // EXOTEL API CALL
-    const response = await axios.post(
-      `https://api.exotel.com/v1/Accounts/${process.env.EXOTEL_SID}/Calls/connect.json`,
-      new URLSearchParams({
-        From: process.env.EXOTEL_FROM_NUMBER,
-        To: phone,
-        CallerId: process.env.EXOTEL_CALLER_ID,
-        CallType: 'trans',
-        Url: `${process.env.SERVER_URL}/api/exotel-say?msg=${encodeURIComponent(message)}`
-      }),
-      {
-        auth: {
-          username: process.env.EXOTEL_API_KEY,
-          password: process.env.EXOTEL_API_TOKEN
-        },
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      }
-    );
-
-    res.json({ success: true, message: 'Call initiated via Exotel', data: response.data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Exotel call failed', error: err.message });
+    res.json({
+      success: true,
+      message: 'Call initiated successfully',
+      callSid: call.sid
+    });
+  } catch (error) {
+    console.error('Call error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate call',
+      error: error.message
+    });
   }
-});
-
-// ✅ Exotel Say XML Endpoint
-app.get('/api/exotel-say', (req, res) => {
-  const msg = req.query.msg || "कोई संदेश नहीं मिला।";
-
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say language="hin">${msg}</Say>
-</Response>`;
-
-  res.type('application/xml');
-  res.send(xml);
 });
 
 // Start server
 app.listen(process.env.PORT || 5000, () => {
-  console.log('Server running on port', process.env.PORT || 5000);
+  console.log('Server started on port', process.env.PORT || 5000);
 });
