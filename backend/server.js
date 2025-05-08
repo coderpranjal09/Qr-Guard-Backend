@@ -1,3 +1,5 @@
+// server.js
+
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -52,14 +54,12 @@ app.get('/api/users/:vehicleId', async (req, res) => {
     res.status(500).json({ message: 'Error retrieving user', error: err.message });
   }
 });
-
-app.get("/", (req, res) => {
+app.get("/",(req,res)=>{
   res.send({
-    status: "server is activated",
-    status: true
+    status:"server is activated",
+    status:true
   })
 })
-
 // Delete user
 app.delete('/api/users/:vehicleId', async (req, res) => {
   try {
@@ -70,7 +70,7 @@ app.delete('/api/users/:vehicleId', async (req, res) => {
   }
 });
 
-// Call handler
+// ✅ OPTION 1: Route that returns TwiML XML (used in live calls)
 app.get('/api/call-handler', (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.say(
@@ -79,32 +79,36 @@ app.get('/api/call-handler', (req, res) => {
       language: 'hi-IN'
     },
     'यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।'
+    
   );
 
   res.type('text/xml');
   res.send(twiml.toString());
 });
 
-// Initiate call
+// ✅ OPTION 2: Initiate call with inline TwiML (recommended for testing)
 app.post('/api/call-owner', async (req, res) => {
   try {
     const { vehicleId } = req.body;
     const user = await User.findOne({ vehicleId });
 
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
     if (!/^\+[1-9]\d{1,14}$/.test(user.driverNo)) {
       return res.status(400).json({ success: false, message: 'Invalid phone number format' });
     }
 
     const call = await client.calls.create({
-      twiml: `<Response>
-        <Say voice="Polly.Aditi" language="hi-IN">
-          यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।
-        </Say>
-      </Response>`,
-      to: user.driverNo,
-      from: process.env.TWILIO_PHONE_NUMBER
-    });
+        // ✅ Inline fallback TwiML instead of external URL
+        twiml: `<Response>
+          <Say voice="Polly.Aditi" language="hi-IN">
+           यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।
+          </Say>
+        </Response>`,
+        to: user.driverNo,
+        from: process.env.TWILIO_PHONE_NUMBER
+      });
+      
 
     res.json({
       success: true,
@@ -116,39 +120,6 @@ app.post('/api/call-owner', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to initiate call',
-      error: error.message
-    });
-  }
-});
-
-// Send SMS
-app.post('/api/send-sms', async (req, res) => {
-  try {
-    const { vehicleId, issue, additionalInfo } = req.body;
-    const user = await User.findOne({ vehicleId });
-
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (!/^\+[1-9]\d{1,14}$/.test(user.driverNo)) {
-      return res.status(400).json({ success: false, message: 'Invalid phone number format' });
-    }
-
-    const message = `🚨 Vehicle Alert!\nVehicle ID: ${vehicleId}\nIssue: ${issue}\nAdditional Info: ${additionalInfo}`;
-    
-    await client.messages.create({
-      body: message,
-      to: user.driverNo,
-      from: process.env.TWILIO_PHONE_NUMBER
-    });
-
-    res.json({ 
-      success: true, 
-      message: 'SMS sent successfully' 
-    });
-  } catch (error) {
-    console.error('SMS error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send SMS',
       error: error.message
     });
   }
