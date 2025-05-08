@@ -1,5 +1,3 @@
-// server.js
-
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -81,7 +79,6 @@ app.post('/api/call-owner', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone number should be 10 digits' });
     }
 
-    // Hindi message
     const message = "यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।";
 
     // EXOTEL API CALL
@@ -89,17 +86,15 @@ app.post('/api/call-owner', async (req, res) => {
       `https://api.exotel.com/v1/Accounts/${process.env.EXOTEL_SID}/Calls/connect.json`,
       new URLSearchParams({
         From: process.env.EXOTEL_FROM_NUMBER,
-        To: '0' + phone, // prepend 0 if needed
+        To: phone,
         CallerId: process.env.EXOTEL_CALLER_ID,
-        CallType: 'transcription',
-        // Hindi TTS
-        // Use Exotel's Say URL to render the message
+        CallType: 'trans',
         Url: `${process.env.SERVER_URL}/api/exotel-say?msg=${encodeURIComponent(message)}`
       }),
       {
         auth: {
-          username: process.env.EXOTEL_SID,
-          password: process.env.EXOTEL_TOKEN
+          username: process.env.EXOTEL_API_KEY,
+          password: process.env.EXOTEL_API_TOKEN
         },
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       }
