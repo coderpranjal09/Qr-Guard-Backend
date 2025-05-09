@@ -36,12 +36,15 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Daily call limit reset job (fixed syntax)
+// Daily call limit reset job (corrected)
 cron.schedule(
   '0 0 * * *',
   async () => {
     try {
-      await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
+      // Use aggregation pipeline syntax for field reference
+      await User.updateMany({}, 
+        [ { $set: { callsLeft: "$callLimit" } } ]
+      );
       console.log('Daily call limits reset at', new Date().toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata'
       }));
@@ -250,7 +253,8 @@ app.get('/', (req, res) => {
   res.json({
     status: 'active',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    serverTimeIST: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
   });
 });
 
@@ -264,15 +268,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.get("/",(req,res)=>{
-  res.send({
-    status:"server is activated",
-    status:true
-  })
-})
-
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+  console.log(`Current IST time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
 });
