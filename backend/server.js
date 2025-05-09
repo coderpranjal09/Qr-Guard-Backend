@@ -23,7 +23,7 @@ const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TO
 const UserSchema = new mongoose.Schema({
   name: String,
   mobileNo: String,
-  vehicleId: String,
+  vehicleId: { type: String, unique: true },
   driverName: String,
   vehicleNo: String,
   model: String,
@@ -36,55 +36,117 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Daily call limit reset job
-cron.schedule('0 0 * * *', {
-  scheduled: true,
-  timezone: "Asia/Kolkata"
-}, async () => {
-  try {
-    await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
-    console.log('Call limits reset at', new Date().toLocaleString());
-  } catch (err) {
-    console.error('Error resetting call limits:', err);
+// Daily call limit reset job (fixed syntax)
+cron.schedule(
+  '0 0 * * *',
+  async () => {
+    try {
+      await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
+      console.log('Daily call limits reset at', new Date().toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata'
+      }));
+    } catch (err) {
+      console.error('Error resetting call limits:', err);
+    }
+  },
+  {
+    scheduled: true,
+    timezone: "Asia/Kolkata"
   }
-});
+);
 
 // Add user
 app.post('/api/users', async (req, res) => {
   try {
-    const exists = await User.findOne({ vehicleId: req.body.vehicleId });
-    if (exists) return res.json({ success: false, message: 'Vehicle already exists' });
+    const existingUser = await User.findOne({ 
+      $or: [
+        { vehicleId: req.body.vehicleId },
+        { mobileNo: req.body.mobileNo },
+        { driverNo: req.body.driverNo }
+      ]
+    });
 
-    const newUser = {
+    if (existingUser) {
+      const conflictField = existingUser.vehicleId === req.body.vehicleId ? 'Vehicle ID' :
+        existingUser.mobileNo === req.body.mobileNo ? 'Mobile Number' : 'Driver Number';
+      return res.status(409).json({ 
+        success: false, 
+        message: `${conflictField} already exists` 
+      });
+    }
+
+    const newUser = new User({
       ...req.body,
       callsLeft: req.body.callLimit || 3,
       callLimit: req.body.callLimit || 3
-    };
+    });
 
-    await new User(newUser).save();
-    res.json({ success: true, message: 'User added successfully' });
+    await newUser.save();
+    res.status(201).json({ 
+      success: true, 
+      message: 'User added successfully',
+      data: {
+        vehicleId: newUser.vehicleId,
+        callsLeft: newUser.callsLeft
+      }
+    });
   } catch (err) {
-    res.json({ success: false, message: 'Error adding user', error: err.message });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error adding user', 
+      error: err.message 
+    });
   }
 });
 
 // Get user
 app.get('/api/users/:vehicleId', async (req, res) => {
   try {
-    const user = await User.findOne({ vehicleId: req.params.vehicleId });
-    res.json(user || {});
+    const user = await User.findOne({ vehicleId: req.params.vehicleId })
+      .select('-__v -_id');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: user
+    });
   } catch (err) {
-    res.status(500).json({ message: 'Error retrieving user', error: err.message });
+    res.status(500).json({ 
+      success: false,
+      message: 'Error retrieving user',
+      error: err.message 
+    });
   }
 });
 
 // Delete user
 app.delete('/api/users/:vehicleId', async (req, res) => {
   try {
-    await User.deleteOne({ vehicleId: req.params.vehicleId });
-    res.sendStatus(200);
+    const result = await User.deleteOne({ vehicleId: req.params.vehicleId });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'User deleted successfully'
+    });
   } catch (err) {
-    res.status(500).json({ message: 'Error deleting user', error: err.message });
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting user',
+      error: err.message
+    });
   }
 });
 
@@ -92,8 +154,11 @@ app.delete('/api/users/:vehicleId', async (req, res) => {
 app.get('/api/call-handler', (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.say(
-    { voice: 'Polly.Aditi', language: 'hi-IN' },
-    'यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है...'
+    { 
+      voice: 'Polly.Aditi', 
+      language: 'hi-IN' 
+    },
+    'यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।'
   );
   res.type('text/xml').send(twiml.toString());
 });
@@ -105,44 +170,61 @@ app.post('/api/call-owner', async (req, res) => {
     const user = await User.findOne({ vehicleId });
     const now = new Date();
 
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Validate phone number format
+    if (!/^\+[1-9]\d{1,14}$/.test(user.driverNo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid phone number format'
+      });
+    }
+
     // Check if new day
     if (user.lastCallTime) {
       const lastCallDate = new Date(user.lastCallTime);
-      if (lastCallDate.toDateString() !== now.toDateString()) {
+      const isSameDay = lastCallDate.toDateString() === now.toDateString();
+      if (!isSameDay) {
         user.callsLeft = user.callLimit;
       }
     }
 
+    // Check call limit
     if (user.callsLeft <= 0) {
-      return res.status(400).json({
+      return res.status(429).json({
         success: false,
-        message: 'Daily call limit exceeded. Try after 12 AM.'
+        message: 'Daily call limit exceeded. Try after 12 AM IST.',
+        resetTime: getNextResetTime()
       });
     }
-
-    // Deduct call
-    user.callsLeft -= 1;
-    user.lastCallTime = now;
-    await user.save();
 
     // Initiate call
     const call = await client.calls.create({
       twiml: `<Response>
         <Say voice="Polly.Aditi" language="hi-IN">
-          यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है...
+          यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।
         </Say>
       </Response>`,
       to: user.driverNo,
       from: process.env.TWILIO_PHONE_NUMBER
     });
 
+    // Update user after successful call
+    user.callsLeft -= 1;
+    user.lastCallTime = now;
+    await user.save();
+
     res.json({
       success: true,
       message: 'Call initiated successfully',
       callSid: call.sid,
-      callsLeft: user.callsLeft
+      callsLeft: user.callsLeft,
+      nextReset: getNextResetTime()
     });
 
   } catch (error) {
@@ -155,10 +237,42 @@ app.post('/api/call-owner', async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.send({ status: "server is activated", status: true });
+// Helper function for reset time
+function getNextResetTime() {
+  const now = new Date();
+  const nextReset = new Date(now);
+  nextReset.setHours(24, 0, 0, 0); // Set to next midnight IST
+  return nextReset.toISOString();
+}
+
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'active',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
-app.listen(process.env.PORT || 5000, () => {
-  console.log('Server started on port', process.env.PORT || 5000);
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message
+  });
+});
+
+app.get("/",(req,res)=>{
+  res.send({
+    status:"server is activated",
+    status:true
+  })
+})
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
 });
