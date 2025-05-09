@@ -11,13 +11,8 @@ app.use(cors());
 app.use(express.json());
 
 // Serverless error handling
-process.on('uncaughtException', err => {
-  console.error('Uncaught Exception:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-});
+process.on('uncaughtException', err => console.error('Uncaught Exception:', err));
+process.on('unhandledRejection', err => console.error('Unhandled Rejection:', err));
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI, {
@@ -73,103 +68,16 @@ app.get('/', (req, res) => {
   res.json({
     status: 'Server is running',
     resetTime: getNextResetTime().istFormatted,
-    documentation: {
-      endpoints: {
-        createUser: 'POST /api/users',
-        getUser: 'GET /api/users/:vehicleId',
-        callOwner: 'POST /api/call-owner'
-      }
+    endpoints: {
+      createUser: 'POST /api/users',
+      getUser: 'GET /api/users/:vehicleId',
+      deleteUser: 'DELETE /api/users/:vehicleId',
+      makeCall: 'POST /api/call-owner'
     }
   });
 });
 
-// Cron reset endpoint (2:05 AM IST)
-app.get('/api/reset-call-limits', async (req, res) => {
-  try {
-    const result = await User.updateMany(
-      {}, 
-      { $set: { callsLeft: "$callLimit" } }
-    );
-    
-    console.log(`[CRON] Reset ${result.modifiedCount} users at ${DateTime.now().setZone('Asia/Kolkata').toFormat('dd LLL yyyy, HH:mm:ss')}`);
-    res.json({ 
-      success: true, 
-      message: `Reset ${result.modifiedCount} users`,
-      nextReset: getNextResetTime()
-    });
-  } catch (err) {
-    console.error('[CRON ERROR]', err);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Reset failed', 
-      error: process.env.NODE_ENV === 'production' ? null : err.message 
-    });
-  }
-});
-
-// Call initiation
-app.post('/api/call-owner', async (req, res) => {
-  try {
-    const { vehicleId } = req.body;
-    const user = await User.findOne({ vehicleId });
-
-    // Validate user
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    
-    // IST time handling
-    const nowIST = DateTime.now().setZone('Asia/Kolkata');
-    const lastCallIST = user.lastCallTime ? 
-      DateTime.fromJSDate(user.lastCallTime).setZone('Asia/Kolkata') : null;
-
-    // Daily reset check
-    if (lastCallIST && !lastCallIST.hasSame(nowIST, 'day')) {
-      user.callsLeft = user.callLimit;
-      console.log(`Auto-reset for ${user.vehicleId}`);
-    }
-
-    // Check call limit
-    if (user.callsLeft <= 0) {
-      return res.status(429).json({
-        success: false,
-        message: 'Daily limit exceeded. Resets at 2:05 AM IST',
-        resetTime: getNextResetTime()
-      });
-    }
-
-    // Make Twilio call
-    const call = await client.calls.create({
-      twiml: `<Response>
-        <Say voice="Polly.Aditi" language="hi-IN">
-          यह आपके वाहन के बारे में एक तात्कालिक चेतावनी है। कृपया तुरंत जाँच करें।
-        </Say>
-      </Response>`,
-      to: user.driverNo,
-      from: process.env.TWILIO_PHONE_NUMBER
-    });
-
-    // Update user
-    user.callsLeft -= 1;
-    user.lastCallTime = new Date();
-    await user.save();
-
-    res.json({
-      success: true,
-      message: 'Call initiated',
-      callsLeft: user.callsLeft,
-      nextReset: getNextResetTime()
-    });
-
-  } catch (error) {
-    console.error('[CALL ERROR]', error);
-    res.status(500).json({
-      success: false,
-      message: 'Call failed',
-      error: process.env.NODE_ENV === 'production' ? null : error.message
-    });
-  }
-});
-
-// Additional routes (users, health, etc.)
+// Add User
 app.post('/api/users', async (req, res) => {
   try {
     const existingUser = await User.findOne({
@@ -209,6 +117,7 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
+// Get User
 app.get('/api/users/:vehicleId', async (req, res) => {
   try {
     const user = await User.findOne({ vehicleId: req.params.vehicleId })
@@ -222,22 +131,119 @@ app.get('/api/users/:vehicleId', async (req, res) => {
   }
 });
 
+// Delete User
+app.delete('/api/users/:vehicleId', async (req, res) => {
+  try {
+    const result = await User.deleteOne({ vehicleId: req.params.vehicleId });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Cron reset endpoint (2:30 AM IST)
+app.get('/api/reset-call-limits', async (req, res) => {
+  try {
+    const result = await User.updateMany(
+      {}, 
+      { $set: { callsLeft: "$callLimit" } }
+    );
+    
+    console.log(`[CRON] Reset ${result.modifiedCount} users at ${DateTime.now().setZone('Asia/Kolkata').toFormat('dd LLL yyyy, HH:mm:ss')}`);
+    res.json({ 
+      success: true, 
+      message: `Reset ${result.modifiedCount} users`,
+      nextReset: getNextResetTime()
+    });
+  } catch (err) {
+    console.error('[CRON ERROR]', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Reset failed', 
+      error: process.env.NODE_ENV === 'production' ? null : err.message 
+    });
+  }
+});
+
+// Call initiation
+app.post('/api/call-owner', async (req, res) => {
+  try {
+    const { vehicleId } = req.body;
+    const user = await User.findOne({ vehicleId });
+
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // IST time handling
+    const nowIST = DateTime.now().setZone('Asia/Kolkata');
+    const lastCallIST = user.lastCallTime ? 
+      DateTime.fromJSDate(user.lastCallTime).setZone('Asia/Kolkata') : null;
+
+    // Daily reset check
+    if (lastCallIST && !lastCallIST.hasSame(nowIST, 'day')) {
+      user.callsLeft = user.callLimit;
+      console.log(`Auto-reset for ${user.vehicleId}`);
+    }
+
+    if (user.callsLeft <= 0) {
+      return res.status(429).json({
+        success: false,
+        message: 'Daily limit exceeded. Resets at 2:30 AM IST',
+        resetTime: getNextResetTime()
+      });
+    }
+
+    // Make Twilio call
+    const call = await client.calls.create({
+      twiml: `<Response>
+        <Say voice="Polly.Aditi" language="hi-IN">
+          यह आपके वाहन के बारे में एक तात्कालिक चेतावनी है। कृपया तुरंत जाँच करें।
+        </Say>
+      </Response>`,
+      to: user.driverNo,
+      from: process.env.TWILIO_PHONE_NUMBER
+    });
+
+    // Update user
+    user.callsLeft -= 1;
+    user.lastCallTime = new Date();
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Call initiated',
+      callsLeft: user.callsLeft,
+      nextReset: getNextResetTime()
+    });
+  } catch (error) {
+    console.error('[CALL ERROR]', error);
+    res.status(500).json({
+      success: false,
+      message: 'Call failed',
+      error: process.env.NODE_ENV === 'production' ? null : error.message
+    });
+  }
+});
+
+// Health check
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
-    timeIST: DateTime.now().setZone('Asia/Kolkata').toFormat('dd LLL yyyy, HH:mm:ss'),
+    istTime: DateTime.now().setZone('Asia/Kolkata').toFormat('dd LLL yyyy, HH:mm:ss'),
     nextReset: getNextResetTime().istFormatted
   });
 });
 
-// ======================
-// Helper Functions
-// ======================
+// Helper functions
 function getNextResetTime() {
   const nowIST = DateTime.now().setZone('Asia/Kolkata');
   let resetTime = nowIST.set({ 
     hour: 2, 
-    minute: 5,  
+    minute: 30,  // 2:30 AM
     second: 0, 
     millisecond: 0 
   });
