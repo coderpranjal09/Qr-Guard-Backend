@@ -36,19 +36,17 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Automatic reset at 1:05 AM IST daily
+// Daily call limit reset job (fixed syntax)
 cron.schedule(
-  '5 1 * * *', // 1:05 AM IST
+  '0 0 * * *',
   async () => {
     try {
-      await User.updateMany({}, 
-        [ { $set: { callsLeft: "$callLimit" } } ]
-      );
-      console.log('Automatic call limits reset at 1:05 AM IST:', new Date().toLocaleString('en-IN', {
+      await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
+      console.log('Daily call limits reset at', new Date().toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata'
       }));
     } catch (err) {
-      console.error('Reset error:', err);
+      console.error('Error resetting call limits:', err);
     }
   },
   {
@@ -57,7 +55,7 @@ cron.schedule(
   }
 );
 
-// Add user endpoint
+// Add user
 app.post('/api/users', async (req, res) => {
   try {
     const existingUser = await User.findOne({ 
@@ -101,7 +99,7 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-// Get user endpoint
+// Get user
 app.get('/api/users/:vehicleId', async (req, res) => {
   try {
     const user = await User.findOne({ vehicleId: req.params.vehicleId })
@@ -127,7 +125,7 @@ app.get('/api/users/:vehicleId', async (req, res) => {
   }
 });
 
-// Delete user endpoint
+// Delete user
 app.delete('/api/users/:vehicleId', async (req, res) => {
   try {
     const result = await User.deleteOne({ vehicleId: req.params.vehicleId });
@@ -152,7 +150,7 @@ app.delete('/api/users/:vehicleId', async (req, res) => {
   }
 });
 
-// Twilio call handler
+// Call handler
 app.get('/api/call-handler', (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.say(
@@ -165,7 +163,7 @@ app.get('/api/call-handler', (req, res) => {
   res.type('text/xml').send(twiml.toString());
 });
 
-// Initiate call endpoint
+// Initiate call
 app.post('/api/call-owner', async (req, res) => {
   try {
     const { vehicleId } = req.body;
@@ -179,6 +177,7 @@ app.post('/api/call-owner', async (req, res) => {
       });
     }
 
+    // Validate phone number format
     if (!/^\+[1-9]\d{1,14}$/.test(user.driverNo)) {
       return res.status(400).json({
         success: false,
@@ -186,7 +185,7 @@ app.post('/api/call-owner', async (req, res) => {
       });
     }
 
-    // Automatic daily reset check
+    // Check if new day
     if (user.lastCallTime) {
       const lastCallDate = new Date(user.lastCallTime);
       const isSameDay = lastCallDate.toDateString() === now.toDateString();
@@ -195,14 +194,16 @@ app.post('/api/call-owner', async (req, res) => {
       }
     }
 
+    // Check call limit
     if (user.callsLeft <= 0) {
       return res.status(429).json({
         success: false,
-        message: 'Daily call limit exceeded. Automatic reset at 1:05 AM IST.',
+        message: 'Daily call limit exceeded. Try after 12 AM IST.',
         resetTime: getNextResetTime()
       });
     }
 
+    // Initiate call
     const call = await client.calls.create({
       twiml: `<Response>
         <Say voice="Polly.Aditi" language="hi-IN">
@@ -213,6 +214,7 @@ app.post('/api/call-owner', async (req, res) => {
       from: process.env.TWILIO_PHONE_NUMBER
     });
 
+    // Update user after successful call
     user.callsLeft -= 1;
     user.lastCallTime = now;
     await user.save();
@@ -235,48 +237,42 @@ app.post('/api/call-owner', async (req, res) => {
   }
 });
 
-// Reset time calculator
+// Helper function for reset time
 function getNextResetTime() {
   const now = new Date();
   const nextReset = new Date(now);
-  
-  // Set to next 1:05 AM IST
-  nextReset.setHours(1, 5, 0, 0);
-  if (nextReset <= now) {
-    nextReset.setDate(nextReset.getDate() + 1);
-  }
-  
-  return nextReset.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    hour12: true,
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  nextReset.setHours(24, 0, 0, 0); // Set to next midnight IST
+  return nextReset.toISOString();
 }
 
-// Server health check
-app.get('/health', (req, res) => {
+// Health check endpoint
+app.get('/', (req, res) => {
   res.json({
     status: 'active',
-    serverTimeIST: new Date().toLocaleString('en-IN', { 
-      timeZone: 'Asia/Kolkata',
-      hour12: true 
-    }),
-    nextAutoReset: getNextResetTime()
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+    error: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message
+  });
+});
+
+app.get("/",(req,res)=>{
+  res.send({
+    status:"server is activated",
+    status:true
+  })
+})
 
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Current IST time: ${new Date().toLocaleString('en-IN', { 
-    timeZone: 'Asia/Kolkata',
-    hour12: true 
-  })}`);
-  console.log(`Next automatic reset at: ${getNextResetTime()}`);
+  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
 });
