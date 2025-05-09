@@ -21,7 +21,7 @@ function FindUser() {
     try {
       const res = await axios.get(`https://qr-guard-backend.vercel.app/api/users/${vehicleId}`);
       setUser(res.data);
-      setMessage('');
+      setMessage(res.data ? '' : 'not-found');
     } catch (err) {
       setUser(null);
       setMessage('error');
@@ -47,7 +47,9 @@ function FindUser() {
   const DetailItem = ({ label, value }) => (
     <div className="space-y-1">
       <dt className="text-sm font-medium text-gray-500">{label}</dt>
-      <dd className="text-gray-900 font-medium">{value || '-'}</dd>
+      <dd className="text-gray-900 font-medium break-words">
+        {value || (label.includes('Time') ? 'No alerts sent' : '-')}
+      </dd>
     </div>
   );
 
@@ -58,12 +60,14 @@ function FindUser() {
       {message && (
         <div className={`mb-6 p-4 rounded-lg flex items-center space-x-3 ${
           message === 'success' ? 'bg-green-100 text-green-700' : 
-          message === 'delete-error' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+          message === 'delete-error' ? 'bg-red-100 text-red-700' :
+          message === 'not-found' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
         }`}>
           {message === 'success' ? <CheckIcon className="w-6 h-6" /> : <XIcon className="w-6 h-6" />}
           <span className="font-medium">
             {message === 'success' ? 'User deleted successfully!' : 
-             message === 'delete-error' ? 'Failed to delete user.' : 'User not found.'}
+             message === 'delete-error' ? 'Failed to delete user.' :
+             message === 'not-found' ? 'User not found' : 'Error searching user'}
           </span>
         </div>
       )}
@@ -79,7 +83,9 @@ function FindUser() {
         <button
           onClick={handleSearch}
           disabled={isSearching}
-          className={`bg-blue-600 text-white font-semibold px-6 py-2 rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ${isSearching ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700 hover:scale-105'}`}
+          className={`bg-blue-600 text-white font-semibold px-6 py-2 rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ${
+            isSearching ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700 hover:scale-105'
+          }`}
         >
           <SearchIcon className="w-5 h-5" />
           <span>{isSearching ? 'Searching...' : 'Search'}</span>
@@ -97,12 +103,27 @@ function FindUser() {
             <DetailItem label="Vehicle Number" value={user.vehicleNo} />
             <DetailItem label="Vehicle Model" value={user.model} />
             <DetailItem label="Email Address" value={user.email} />
+            <DetailItem label="Daily Call Limit" value={user.callLimit} />
+            <DetailItem label="Calls Left Today" value={user.callsLeft} />
+            <DetailItem 
+              label="Last Alert Time" 
+              value={user.lastCallTime ? 
+                new Date(user.lastCallTime).toLocaleString('en-IN', {
+                  timeZone: 'Asia/Kolkata',
+                  dateStyle: 'short',
+                  timeStyle: 'short'
+                }) : 
+                'No alerts sent'
+              } 
+            />
           </div>
           
           <button
             onClick={handleDelete}
             disabled={isDeleting}
-            className={`w-full bg-red-600 text-white font-semibold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ${isDeleting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-700 hover:scale-[1.02]'}`}
+            className={`w-full bg-red-600 text-white font-semibold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 ${
+              isDeleting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-700 hover:scale-[1.02]'
+            }`}
           >
             <TrashIcon className="w-5 h-5" />
             <span>{isDeleting ? 'Deleting...' : 'Delete User'}</span>

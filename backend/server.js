@@ -1,10 +1,9 @@
-// server.js
-
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const twilio = require('twilio');
+const cron = require('node-cron');
 dotenv.config();
 
 const app = express();
@@ -21,7 +20,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 // MongoDB schema
-const User = mongoose.model('User', {
+const UserSchema = new mongoose.Schema({
   name: String,
   mobileNo: String,
   vehicleId: String,
@@ -29,7 +28,25 @@ const User = mongoose.model('User', {
   vehicleNo: String,
   model: String,
   email: String,
-  driverNo: String
+  driverNo: String,
+  callLimit: { type: Number, default: 3 },
+  callsLeft: { type: Number, default: 3 },
+  lastCallTime: Date
+});
+
+const User = mongoose.model('User', UserSchema);
+
+// Daily call limit reset job
+cron.schedule('0 0 * * *', {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+}, async () => {
+  try {
+    await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
+    console.log('Call limits reset at', new Date().toLocaleString());
+  } catch (err) {
+    console.error('Error resetting call limits:', err);
+  }
 });
 
 // Add user
@@ -38,7 +55,13 @@ app.post('/api/users', async (req, res) => {
     const exists = await User.findOne({ vehicleId: req.body.vehicleId });
     if (exists) return res.json({ success: false, message: 'Vehicle already exists' });
 
-    await new User(req.body).save();
+    const newUser = {
+      ...req.body,
+      callsLeft: req.body.callLimit || 3,
+      callLimit: req.body.callLimit || 3
+    };
+
+    await new User(newUser).save();
     res.json({ success: true, message: 'User added successfully' });
   } catch (err) {
     res.json({ success: false, message: 'Error adding user', error: err.message });
@@ -54,12 +77,7 @@ app.get('/api/users/:vehicleId', async (req, res) => {
     res.status(500).json({ message: 'Error retrieving user', error: err.message });
   }
 });
-app.get("/",(req,res)=>{
-  res.send({
-    status:"server is activated",
-    status:true
-  })
-})
+
 // Delete user
 app.delete('/api/users/:vehicleId', async (req, res) => {
   try {
@@ -70,51 +88,63 @@ app.delete('/api/users/:vehicleId', async (req, res) => {
   }
 });
 
-// ✅ OPTION 1: Route that returns TwiML XML (used in live calls)
+// Call handler
 app.get('/api/call-handler', (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.say(
-    {
-      voice: 'Polly.Aditi',
-      language: 'hi-IN'
-    },
-    'यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।'
-    
+    { voice: 'Polly.Aditi', language: 'hi-IN' },
+    'यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है...'
   );
-
-  res.type('text/xml');
-  res.send(twiml.toString());
+  res.type('text/xml').send(twiml.toString());
 });
 
-// ✅ OPTION 2: Initiate call with inline TwiML (recommended for testing)
+// Initiate call
 app.post('/api/call-owner', async (req, res) => {
   try {
     const { vehicleId } = req.body;
     const user = await User.findOne({ vehicleId });
+    const now = new Date();
 
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    if (!/^\+[1-9]\d{1,14}$/.test(user.driverNo)) {
-      return res.status(400).json({ success: false, message: 'Invalid phone number format' });
+    
+    // Check if new day
+    if (user.lastCallTime) {
+      const lastCallDate = new Date(user.lastCallTime);
+      if (lastCallDate.toDateString() !== now.toDateString()) {
+        user.callsLeft = user.callLimit;
+      }
     }
 
-    const call = await client.calls.create({
-        // ✅ Inline fallback TwiML instead of external URL
-        twiml: `<Response>
-          <Say voice="Polly.Aditi" language="hi-IN">
-           यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।
-          </Say>
-        </Response>`,
-        to: user.driverNo,
-        from: process.env.TWILIO_PHONE_NUMBER
+    if (user.callsLeft <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Daily call limit exceeded. Try after 12 AM.'
       });
-      
+    }
+
+    // Deduct call
+    user.callsLeft -= 1;
+    user.lastCallTime = now;
+    await user.save();
+
+    // Initiate call
+    const call = await client.calls.create({
+      twiml: `<Response>
+        <Say voice="Polly.Aditi" language="hi-IN">
+          यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है...
+        </Say>
+      </Response>`,
+      to: user.driverNo,
+      from: process.env.TWILIO_PHONE_NUMBER
+    });
 
     res.json({
       success: true,
       message: 'Call initiated successfully',
-      callSid: call.sid
+      callSid: call.sid,
+      callsLeft: user.callsLeft
     });
+
   } catch (error) {
     console.error('Call error:', error);
     res.status(500).json({
@@ -125,7 +155,10 @@ app.post('/api/call-owner', async (req, res) => {
   }
 });
 
-// Start server
+app.get("/", (req, res) => {
+  res.send({ status: "server is activated", status: true });
+});
+
 app.listen(process.env.PORT || 5000, () => {
   console.log('Server started on port', process.env.PORT || 5000);
 });
