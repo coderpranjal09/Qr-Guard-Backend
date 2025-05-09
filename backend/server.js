@@ -3,7 +3,6 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const twilio = require('twilio');
-const cron = require('node-cron');
 dotenv.config();
 
 const app = express();
@@ -36,24 +35,19 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Daily call limit reset job (updated to 1:18 AM IST)
-cron.schedule(
-  '18 1 * * *', // 1:18 AM IST
-  async () => {
-    try {
-      await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
-      console.log('Daily call limits reset at', new Date().toLocaleString('en-IN', {
-        timeZone: 'Asia/Kolkata'
-      }));
-    } catch (err) {
-      console.error('Error resetting call limits:', err);
-    }
-  },
-  {
-    scheduled: true,
-    timezone: "Asia/Kolkata"
+// Vercel cron endpoint (Trigger at 1:26 AM IST)
+app.get('/api/reset-call-limits', async (req, res) => {
+  try {
+    await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
+    console.log('Call limits reset at', new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata'
+    }));
+    res.status(200).json({ success: true, message: 'Call limits reset successfully' });
+  } catch (err) {
+    console.error('Reset error:', err);
+    res.status(500).json({ success: false, message: 'Reset failed', error: err.message });
   }
-);
+});
 
 // Add user
 app.post('/api/users', async (req, res) => {
@@ -185,10 +179,17 @@ app.post('/api/call-owner', async (req, res) => {
       });
     }
 
-    // Check if new day
-    if (user.lastCallTime) {
-      const lastCallDate = new Date(user.lastCallTime);
-      const isSameDay = lastCallDate.toDateString() === now.toDateString();
+    // IST time check
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+    const istNow = new Date(now.getTime() + istOffset);
+    const istLastCall = user.lastCallTime ? 
+      new Date(user.lastCallTime.getTime() + istOffset) : null;
+
+    // Check if new day in IST
+    if (istLastCall) {
+      const isSameDay = istLastCall.getDate() === istNow.getDate() && 
+                       istLastCall.getMonth() === istNow.getMonth() && 
+                       istLastCall.getFullYear() === istNow.getFullYear();
       if (!isSameDay) {
         user.callsLeft = user.callLimit;
       }
@@ -198,7 +199,7 @@ app.post('/api/call-owner', async (req, res) => {
     if (user.callsLeft <= 0) {
       return res.status(429).json({
         success: false,
-        message: 'Daily call limit exceeded. Try after 1:18 AM IST.',
+        message: 'Daily call limit exceeded. Try after 1:26 AM IST.',
         resetTime: getNextResetTime()
       });
     }
@@ -237,24 +238,26 @@ app.post('/api/call-owner', async (req, res) => {
   }
 });
 
-// Updated helper function for reset time (1:18 AM IST)
+// Reset time calculation for IST
 function getNextResetTime() {
   const now = new Date();
-  const nextReset = new Date(now);
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffset);
   
-  // Set to next 1:18 AM IST
-  nextReset.setHours(1, 18, 0, 0); // 1:18 AM
+  let nextReset = new Date(istNow);
+  nextReset.setHours(1, 26, 0, 0); // 1:26 AM IST
   
-  // If it's already past 1:18 AM today, set to tomorrow
-  if (nextReset <= now) {
+  if (nextReset <= istNow) {
     nextReset.setDate(nextReset.getDate() + 1);
   }
   
-  return nextReset.toISOString();
+  // Convert back to UTC for ISO string
+  const utcReset = new Date(nextReset.getTime() - istOffset);
+  return utcReset.toISOString();
 }
 
-// Health check endpoint
-app.get('/', (req, res) => {
+// Health check
+app.get('/health', (req, res) => {
   res.json({
     status: 'active',
     timestamp: new Date().toISOString(),
@@ -262,7 +265,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Error handling middleware
+// Error handling
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
@@ -272,15 +275,4 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.get("/",(req,res)=>{
-  res.send({
-    status:"server is activated",
-    status:true
-  })
-})
-
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-});
+module.exports = app;
