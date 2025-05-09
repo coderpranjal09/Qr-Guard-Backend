@@ -36,9 +36,9 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Daily call limit reset job (fixed syntax)
+// Daily call limit reset job (updated to 1:18 AM IST)
 cron.schedule(
-  '0 0 * * *',
+  '18 1 * * *', // 1:18 AM IST
   async () => {
     try {
       await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
@@ -198,7 +198,7 @@ app.post('/api/call-owner', async (req, res) => {
     if (user.callsLeft <= 0) {
       return res.status(429).json({
         success: false,
-        message: 'Daily call limit exceeded. Try after 12 AM IST.',
+        message: 'Daily call limit exceeded. Try after 1:18 AM IST.',
         resetTime: getNextResetTime()
       });
     }
@@ -237,11 +237,19 @@ app.post('/api/call-owner', async (req, res) => {
   }
 });
 
-// Helper function for reset time
+// Updated helper function for reset time (1:18 AM IST)
 function getNextResetTime() {
   const now = new Date();
   const nextReset = new Date(now);
-  nextReset.setHours(24, 0, 0, 0); // Set to next midnight IST
+  
+  // Set to next 1:18 AM IST
+  nextReset.setHours(1, 18, 0, 0); // 1:18 AM
+  
+  // If it's already past 1:18 AM today, set to tomorrow
+  if (nextReset <= now) {
+    nextReset.setDate(nextReset.getDate() + 1);
+  }
+  
   return nextReset.toISOString();
 }
 
