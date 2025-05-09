@@ -51,21 +51,20 @@ const User = mongoose.model('User', UserSchema);
 app.post('/api/manual-reset', async (req, res) => {
   try {
     const result = await User.updateMany(
-      {}, 
-      { $set: { callsLeft: "$callLimit" } }
+      {},
+      [ { $set: { callsLeft: "$callLimit" } } ] // <- Aggregation pipeline update
     );
-    
-    res.status(200).json({
+
+    res.json({ 
       success: true,
       message: `Reset ${result.modifiedCount} users`,
       resetAt: new Date().toISOString()
     });
   } catch (err) {
-    console.error('Reset error:', err);
-    res.status(500).json({
-      success: false,
-      message: 'Reset failed',
-      error: err.message
+    res.status(500).json({ 
+      success: false, 
+      message: 'Reset failed', 
+      error: err.message 
     });
   }
 });
