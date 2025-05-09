@@ -33,13 +33,28 @@ function AddUser() {
     setFormData({ ...formData, [e.target.name]: value });
   };
 
+  const incrementCallLimit = () => {
+    setFormData(prev => ({
+      ...prev,
+      callLimit: prev.callLimit + 1
+    }));
+  };
+
+  const decrementCallLimit = () => {
+    if (formData.callLimit > 1) {
+      setFormData(prev => ({
+        ...prev,
+        callLimit: prev.callLimit - 1
+      }));
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     try {
       await axios.post('https://qr-guard-backend.vercel.app/api/users', formData);
       setMessage('success');
-      // Reset form but keep callLimit value
       setFormData({
         name: '',
         mobileNo: '',
@@ -92,15 +107,32 @@ function AddUser() {
               {fieldLabels[field]}
             </label>
             {field === 'callLimit' ? (
-              <input
-                type="number"
-                name={field}
-                value={value}
-                onChange={handleChange}
-                min="1"
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={decrementCallLimit}
+                  disabled={formData.callLimit <= 1}
+                  className="px-3 py-1.5 border rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  -
+                </button>
+                <input
+                  type="number"
+                  name={field}
+                  value={value}
+                  onChange={handleChange}
+                  min="1"
+                  required
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg [-moz-appearance:textfield] [-webkit-appearance:none]"
+                />
+                <button
+                  type="button"
+                  onClick={incrementCallLimit}
+                  className="px-3 py-1.5 border rounded-lg bg-gray-100 hover:bg-gray-200"
+                >
+                  +
+                </button>
+              </div>
             ) : (
               <input
                 type="text"
