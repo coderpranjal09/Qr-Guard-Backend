@@ -237,7 +237,7 @@ function getNextResetTime() {
   const nowIST = DateTime.now().setZone('Asia/Kolkata');
   let resetTime = nowIST.set({ 
     hour: 2, 
-    minute: 5,  // 2:05 AM
+    minute: 5,  
     second: 0, 
     millisecond: 0 
   });
