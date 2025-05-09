@@ -10,13 +10,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Error handling for serverless environments
+// Serverless error handling
 process.on('uncaughtException', err => {
   console.error('Uncaught Exception:', err);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
 });
 
 // MongoDB Connection
@@ -24,10 +24,10 @@ mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000
+  socketTimeoutMS: 30000
 })
 .then(() => console.log(`MongoDB connected at ${DateTime.now().setZone('Asia/Kolkata').toFormat('dd LLL yyyy, HH:mm:ss')}`))
-.catch(err => console.error('MongoDB connection error:', err));
+.catch(err => console.error('MongoDB connection failed:', err));
 
 // Twilio Client
 const client = twilio(
@@ -56,7 +56,7 @@ const UserSchema = new mongoose.Schema({
   lastCallTime: {
     type: Date,
     validate: {
-      validator: v => v <= new Date(),
+      validator: v => v <= Date.now(),
       message: 'Last call time cannot be in the future!'
     }
   }
@@ -64,7 +64,26 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Cron Job Endpoint (1:50 AM IST)
+// ======================
+// Routes
+// ======================
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'Server is running',
+    resetTime: getNextResetTime().istFormatted,
+    documentation: {
+      endpoints: {
+        createUser: 'POST /api/users',
+        getUser: 'GET /api/users/:vehicleId',
+        callOwner: 'POST /api/call-owner'
+      }
+    }
+  });
+});
+
+// Cron reset endpoint (1:44 AM IST)
 app.get('/api/reset-call-limits', async (req, res) => {
   try {
     const result = await User.updateMany(
@@ -75,7 +94,7 @@ app.get('/api/reset-call-limits', async (req, res) => {
     console.log(`[CRON] Reset ${result.modifiedCount} users at ${DateTime.now().setZone('Asia/Kolkata').toFormat('dd LLL yyyy, HH:mm:ss')}`);
     res.json({ 
       success: true, 
-      message: `Reset ${result.modifiedCount} users successfully`,
+      message: `Reset ${result.modifiedCount} users`,
       nextReset: getNextResetTime()
     });
   } catch (err) {
@@ -83,39 +102,41 @@ app.get('/api/reset-call-limits', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Reset failed', 
-      error: err.message 
+      error: process.env.NODE_ENV === 'production' ? null : err.message 
     });
   }
 });
 
-// Call Initiation Endpoint
+// Call initiation
 app.post('/api/call-owner', async (req, res) => {
   try {
     const { vehicleId } = req.body;
     const user = await User.findOne({ vehicleId });
 
+    // Validate user
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     
-    // IST Time Handling
+    // IST time handling
     const nowIST = DateTime.now().setZone('Asia/Kolkata');
     const lastCallIST = user.lastCallTime ? 
       DateTime.fromJSDate(user.lastCallTime).setZone('Asia/Kolkata') : null;
 
-    // Daily Auto-Reset Check
+    // Daily reset check
     if (lastCallIST && !lastCallIST.hasSame(nowIST, 'day')) {
       user.callsLeft = user.callLimit;
-      console.log(`Auto-reset triggered for ${user.vehicleId}`);
+      console.log(`Auto-reset for ${user.vehicleId}`);
     }
 
+    // Check call limit
     if (user.callsLeft <= 0) {
       return res.status(429).json({
         success: false,
-        message: 'Daily limit exceeded. Resets at 1:50 AM IST',
+        message: 'Daily limit exceeded. Resets at 1:44 AM IST',
         resetTime: getNextResetTime()
       });
     }
 
-    // Twilio Call
+    // Make Twilio call
     const call = await client.calls.create({
       twiml: `<Response>
         <Say voice="Polly.Aditi" language="hi-IN">
@@ -126,14 +147,14 @@ app.post('/api/call-owner', async (req, res) => {
       from: process.env.TWILIO_PHONE_NUMBER
     });
 
-    // Update User
+    // Update user
     user.callsLeft -= 1;
     user.lastCallTime = new Date();
     await user.save();
 
     res.json({
       success: true,
-      message: 'Call initiated successfully',
+      message: 'Call initiated',
       callsLeft: user.callsLeft,
       nextReset: getNextResetTime()
     });
@@ -142,18 +163,81 @@ app.post('/api/call-owner', async (req, res) => {
     console.error('[CALL ERROR]', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to initiate call',
-      error: error.message
+      message: 'Call failed',
+      error: process.env.NODE_ENV === 'production' ? null : error.message
     });
   }
 });
 
-// Helper Function for Reset Time
+// Additional routes (users, health, etc.)
+app.post('/api/users', async (req, res) => {
+  try {
+    const existingUser = await User.findOne({
+      $or: [
+        { vehicleId: req.body.vehicleId },
+        { mobileNo: req.body.mobileNo },
+        { driverNo: req.body.driverNo }
+      ]
+    });
+
+    if (existingUser) {
+      const conflictField = existingUser.vehicleId === req.body.vehicleId ? 'Vehicle ID' :
+        existingUser.mobileNo === req.body.mobileNo ? 'Mobile Number' : 'Driver Number';
+      return res.status(409).json({ 
+        success: false, 
+        message: `${conflictField} already exists` 
+      });
+    }
+
+    const newUser = await User.create({
+      ...req.body,
+      callsLeft: req.body.callLimit || 1,
+      callLimit: req.body.callLimit || 1
+    });
+
+    res.status(201).json({
+      success: true,
+      data: newUser,
+      message: 'User created successfully'
+    });
+  } catch (err) {
+    res.status(400).json({
+      success: false,
+      message: 'Validation error',
+      error: err.message
+    });
+  }
+});
+
+app.get('/api/users/:vehicleId', async (req, res) => {
+  try {
+    const user = await User.findOne({ vehicleId: req.params.vehicleId })
+      .select('-__v -_id');
+
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    
+    res.json({ success: true, data: user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timeIST: DateTime.now().setZone('Asia/Kolkata').toFormat('dd LLL yyyy, HH:mm:ss'),
+    nextReset: getNextResetTime().istFormatted
+  });
+});
+
+// ======================
+// Helper Functions
+// ======================
 function getNextResetTime() {
   const nowIST = DateTime.now().setZone('Asia/Kolkata');
   let resetTime = nowIST.set({ 
     hour: 1, 
-    minute: 50,  // Changed to 1:50 AM
+    minute: 44,  // 1:44 AM
     second: 0, 
     millisecond: 0 
   });
@@ -169,26 +253,12 @@ function getNextResetTime() {
   };
 }
 
-// Additional Routes (Users, Health, etc.)
-// [Include all other routes from previous code here]
-
-// Health Check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    istTime: DateTime.now().setZone('Asia/Kolkata').toISO(),
-    nextReset: getNextResetTime(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Error Handling Middleware
+// Error handling
 app.use((err, req, res, next) => {
   console.error('[SERVER ERROR]', err);
   res.status(500).json({
     success: false,
-    message: 'Internal server error',
-    error: process.env.NODE_ENV === 'production' ? undefined : err.message
+    message: 'Internal server error'
   });
 });
 
