@@ -38,7 +38,7 @@ const User = mongoose.model('User', UserSchema);
 
 // Daily call limit reset job (fixed syntax)
 cron.schedule(
-  '0 0 * * *',
+  '* * * * *',
   async () => {
     try {
       await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });

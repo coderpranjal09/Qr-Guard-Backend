@@ -20,11 +20,16 @@ function FindUser() {
     setIsSearching(true);
     try {
       const res = await axios.get(`https://qr-guard-backend.vercel.app/api/users/${vehicleId}`);
-      setUser(res.data);
-      setMessage(res.data ? '' : 'not-found');
+      if (res.data.success && res.data.data) {
+        setUser(res.data.data);
+        setMessage('');
+      } else {
+        setUser(null);
+        setMessage('not-found');
+      }
     } catch (err) {
       setUser(null);
-      setMessage('error');
+      setMessage(err.response?.status === 404 ? 'not-found' : 'error');
     } finally {
       setIsSearching(false);
     }
