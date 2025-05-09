@@ -23,7 +23,7 @@
   "crons": [
     {
       "path": "/api/reset-call-limits",
-      "schedule": "5 20 * * *" 
+      "schedule": "15 20 * * *" 
     }
   ]
 }
