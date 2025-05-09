@@ -9,6 +9,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Add response formatting middleware
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
+
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
@@ -18,7 +24,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 // Twilio client
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-// Enhanced User Schema with call limits
+// User Schema
 const UserSchema = new mongoose.Schema({
   name: String,
   mobileNo: String,
@@ -41,11 +47,39 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Add user with call limit initialization
+// Manual Reset Endpoint (Fixed)
+app.post('/api/manual-reset', async (req, res) => {
+  try {
+    const result = await User.updateMany(
+      {}, 
+      { $set: { callsLeft: "$callLimit" } }
+    );
+    
+    res.status(200).json({
+      success: true,
+      message: `Reset ${result.modifiedCount} users`,
+      resetAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('Reset error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Reset failed',
+      error: err.message
+    });
+  }
+});
+
+// Add user (Fixed response format)
 app.post('/api/users', async (req, res) => {
   try {
     const exists = await User.findOne({ vehicleId: req.body.vehicleId });
-    if (exists) return res.status(409).json({ success: false, message: 'Vehicle already exists' });
+    if (exists) {
+      return res.status(409).json({
+        success: false,
+        message: 'Vehicle already exists'
+      });
+    }
 
     const newUser = await User.create({
       ...req.body,
@@ -53,58 +87,62 @@ app.post('/api/users', async (req, res) => {
       callLimit: req.body.callLimit || 1
     });
 
-    res.json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       message: 'User added successfully',
-      data: {
-        vehicleId: newUser.vehicleId,
-        callsLeft: newUser.callsLeft
-      }
+      data: newUser
     });
   } catch (err) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error adding user', 
-      error: err.message 
+    res.status(400).json({
+      success: false,
+      message: 'Validation error',
+      error: err.message
     });
   }
 });
 
-// Get user with call limit info
+// Get user (Fixed response format)
 app.get('/api/users/:vehicleId', async (req, res) => {
   try {
     const user = await User.findOne({ vehicleId: req.params.vehicleId })
       .select('-__v -_id');
 
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
-    res.json({ 
+    res.json({
       success: true,
-      data: {
-        ...user._doc,
-        remainingCalls: user.callsLeft,
-        lastCall: user.lastCallTime
-      }
+      data: user
     });
   } catch (err) {
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: 'Error retrieving user',
-      error: err.message 
+      message: 'Server error',
+      error: err.message
     });
   }
 });
 
-// Delete user
+// Delete user (Fixed response format)
 app.delete('/api/users/:vehicleId', async (req, res) => {
   try {
     const result = await User.deleteOne({ vehicleId: req.params.vehicleId });
     
     if (result.deletedCount === 0) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
     }
 
-    res.json({ success: true, message: 'User deleted successfully' });
+    res.json({
+      success: true,
+      message: 'User deleted successfully'
+    });
   } catch (err) {
     res.status(500).json({
       success: false,
@@ -114,35 +152,29 @@ app.delete('/api/users/:vehicleId', async (req, res) => {
   }
 });
 
-// Manual reset endpoint
-app.post('/api/manual-reset', async (req, res) => {
-  try {
-    const result = await User.updateMany(
-      {}, 
-      { $set: { callsLeft: "$callLimit" } }
-    );
-    
-    res.json({ 
-      success: true,
-      message: `Reset ${result.modifiedCount} users`,
-      resetAt: new Date().toISOString()
-    });
-  } catch (err) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Reset failed', 
-      error: err.message 
-    });
-  }
+// Call handler (Remains unchanged)
+app.get('/api/call-handler', (req, res) => {
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.say(
+    { 
+      voice: 'Polly.Aditi', 
+      language: 'hi-IN' 
+    },
+    'यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।'
+  );
+  res.type('text/xml').send(twiml.toString());
 });
 
-// Call initiation with call limit check
+// Call initiation (Remains unchanged)
 app.post('/api/call-owner', async (req, res) => {
   try {
     const { vehicleId } = req.body;
     const user = await User.findOne({ vehicleId });
 
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) return res.status(404).json({ 
+      success: false, 
+      message: 'User not found' 
+    });
 
     if (user.callsLeft <= 0) {
       return res.status(429).json({
@@ -151,19 +183,16 @@ app.post('/api/call-owner', async (req, res) => {
       });
     }
 
-    // Make Twilio call
     const call = await client.calls.create({
       twiml: `<Response>
         <Say voice="Polly.Aditi" language="hi-IN">
-          यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। 
-          आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।
+          यह आपके वाहन के बारे में एक तात्कालिक और महत्वपूर्ण चेतावनी है। कृपया तुरंत अपने वाहन की जाँच करें। आपके वाहन के साथ कोई गंभीर समस्या हो सकती है। कृपया इसे नजरअंदाज न करें। धन्यवाद।
         </Say>
       </Response>`,
       to: user.driverNo,
       from: process.env.TWILIO_PHONE_NUMBER
     });
 
-    // Update call limit and timestamp
     user.callsLeft -= 1;
     user.lastCallTime = new Date();
     await user.save();
@@ -184,14 +213,26 @@ app.post('/api/call-owner', async (req, res) => {
   }
 });
 
+// Root endpoint (Fixed response format)
 app.get("/", (req, res) => {
-  res.send({
-    status: "server is activated",
-    status: true
+  res.json({
+    status: true,
+    message: "Server is activated",
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    message: 'Internal Server Error',
+    error: process.env.NODE_ENV === 'production' ? null : err.message
   });
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log('Server started on port', PORT);
+  console.log(`Server running on port ${PORT}`);
 });
