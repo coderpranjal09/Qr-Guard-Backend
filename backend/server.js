@@ -13,7 +13,9 @@ app.use(express.json());
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
-});
+})
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
 
 // Twilio client
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -35,7 +37,7 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Vercel cron endpoint (Trigger at 1:26 AM IST)
+// Vercel cron endpoint (Trigger at 1:35 AM IST)
 app.get('/api/reset-call-limits', async (req, res) => {
   try {
     await User.updateMany({}, { $set: { callsLeft: "$callLimit" } });
@@ -199,7 +201,7 @@ app.post('/api/call-owner', async (req, res) => {
     if (user.callsLeft <= 0) {
       return res.status(429).json({
         success: false,
-        message: 'Daily call limit exceeded. Try after 1:26 AM IST.',
+        message: 'Daily call limit exceeded. Try after 1:35 AM IST.',
         resetTime: getNextResetTime()
       });
     }
@@ -245,7 +247,7 @@ function getNextResetTime() {
   const istNow = new Date(now.getTime() + istOffset);
   
   let nextReset = new Date(istNow);
-  nextReset.setHours(1, 26, 0, 0); // 1:26 AM IST
+  nextReset.setHours(1, 35, 0, 0); // 1:35 AM IST
   
   if (nextReset <= istNow) {
     nextReset.setDate(nextReset.getDate() + 1);
@@ -262,6 +264,15 @@ app.get('/health', (req, res) => {
     status: 'active',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'Server is running',
+    version: '1.0',
+    resetTime: getNextResetTime()
   });
 });
 
