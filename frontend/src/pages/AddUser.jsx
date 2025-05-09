@@ -12,7 +12,7 @@ function AddUser() {
     model: '',
     email: '',
     driverNo: '+91',
-    callLimit: 3
+    callLimit: 1
   });
 
   const [message, setMessage] = useState('');
