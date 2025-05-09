@@ -3,27 +3,26 @@
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["**/*.js", "package.json", "package-lock.json"]
+      }
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "/server.js"
+      "dest": "server.js"
     },
     {
-      "src": "/health",
-      "dest": "/server.js"
-    },
-    {
-      "src": "/",
-      "dest": "/server.js"
+      "src": "/(.*)",
+      "dest": "server.js"
     }
   ],
   "crons": [
     {
       "path": "/api/reset-call-limits",
-      "schedule": "15 20 * * *" 
+      "schedule": "20 20 * * *" 
     }
   ]
 }
