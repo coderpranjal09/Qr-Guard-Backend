@@ -10,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Error handling for serverless environments
+// Serverless error handling
 process.on('uncaughtException', err => {
   console.error('Uncaught Exception:', err);
 });
@@ -73,15 +73,17 @@ app.get('/', (req, res) => {
   res.json({
     status: 'Server is running',
     resetTime: getNextResetTime().istFormatted,
-    endpoints: {
-      createUser: 'POST /api/users',
-      makeCall: 'POST /api/call-owner',
-      getUser: 'GET /api/users/:vehicleId'
+    documentation: {
+      endpoints: {
+        createUser: 'POST /api/users',
+        getUser: 'GET /api/users/:vehicleId',
+        callOwner: 'POST /api/call-owner'
+      }
     }
   });
 });
 
-// Cron reset endpoint (1:57 AM IST)
+// Cron reset endpoint (2:05 AM IST)
 app.get('/api/reset-call-limits', async (req, res) => {
   try {
     const result = await User.updateMany(
@@ -111,6 +113,7 @@ app.post('/api/call-owner', async (req, res) => {
     const { vehicleId } = req.body;
     const user = await User.findOne({ vehicleId });
 
+    // Validate user
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     
     // IST time handling
@@ -124,10 +127,11 @@ app.post('/api/call-owner', async (req, res) => {
       console.log(`Auto-reset for ${user.vehicleId}`);
     }
 
+    // Check call limit
     if (user.callsLeft <= 0) {
       return res.status(429).json({
         success: false,
-        message: 'Daily limit exceeded. Resets at 1:57 AM IST',
+        message: 'Daily limit exceeded. Resets at 2:05 AM IST',
         resetTime: getNextResetTime()
       });
     }
@@ -232,8 +236,8 @@ app.get('/health', (req, res) => {
 function getNextResetTime() {
   const nowIST = DateTime.now().setZone('Asia/Kolkata');
   let resetTime = nowIST.set({ 
-    hour: 1, 
-    minute: 57,  // 1:57 AM
+    hour: 2, 
+    minute: 5,  // 2:05 AM
     second: 0, 
     millisecond: 0 
   });
