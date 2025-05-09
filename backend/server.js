@@ -29,8 +29,8 @@ const UserSchema = new mongoose.Schema({
   model: String,
   email: String,
   driverNo: String,
-  callLimit: { type: Number, default: 3 },
-  callsLeft: { type: Number, default: 3 },
+  callLimit: { type: Number, default: 1 },
+  callsLeft: { type: Number, default: 1 },
   lastCallTime: Date
 });
 
