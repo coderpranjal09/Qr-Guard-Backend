@@ -5,10 +5,12 @@ import { UserAddIcon, SearchIcon, RefreshIcon } from '@heroicons/react/outline';
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const handleResetCallLimits = async () => {
     try {
-      const response = await fetch('/api/manual-reset', {
+      setIsResetting(true);
+      const response = await fetch('https://qr-guard-backend.vercel.app/api/manual-reset', {
         method: 'POST'
       });
 
@@ -33,15 +35,26 @@ export default function AdminDashboard() {
       console.error('Reset error:', error);
       alert('Error: ' + error.message);
     } finally {
+      setIsResetting(false);
       setShowConfirmation(false);
     }
   };
 
   return (
     <div className="max-w-4xl mx-auto p-6">
+      {/* Loader Overlay */}
+      {isResetting && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="flex flex-col items-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+            <p className="text-white mt-4">Resetting call limits...</p>
+          </div>
+        </div>
+      )}
+
       {/* Confirmation Modal */}
       {showConfirmation && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-40">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h3 className="text-xl font-semibold mb-4">Confirm Reset</h3>
             <p className="text-gray-600 mb-6">
@@ -51,20 +64,23 @@ export default function AdminDashboard() {
               <button
                 onClick={() => setShowConfirmation(false)}
                 className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                disabled={isResetting}
               >
                 Cancel
               </button>
               <button
                 onClick={handleResetCallLimits}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                disabled={isResetting}
               >
-                Confirm Reset
+                {isResetting ? 'Processing...' : 'Confirm Reset'}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Rest of your component remains the same */}
       <div className="text-center mb-10">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Admin Dashboard</h1>
         <p className="text-gray-600 text-lg">
@@ -108,6 +124,7 @@ export default function AdminDashboard() {
             className="w-full group p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow 
                      border border-gray-200 hover:border-red-500 flex flex-col items-center
                      transform hover:-translate-y-1 duration-200"
+            disabled={isResetting}
           >
             <RefreshIcon className="w-12 h-12 text-red-600 mb-4 group-hover:text-red-700 transition-colors" />
             <span className="text-xl font-semibold text-gray-800 mb-2">Reset All Call Limits</span>
